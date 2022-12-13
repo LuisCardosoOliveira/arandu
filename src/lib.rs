@@ -3,6 +3,8 @@ use dotenv::dotenv;
 use std::env::{self, VarError};
 use thiserror::Error;
 
+use serde::Deserialize;
+
 #[derive(Error, Debug)]
 pub enum CompletionApiError {
     #[error("Request to fetch completion failed: {0}")]
@@ -11,13 +13,25 @@ pub enum CompletionApiError {
     FailedToGetVarEnv(VarError),
     #[error("Failed converting response to string")]
     FailedResponseToString(std::io::Error),
+    #[error("Response JSON parsing failed")]
+    ChoiceParseFailed(serde_json::Error),
 }
 
-pub fn get_ai_completion(prompt: String) -> Result<String> {
+#[derive(Deserialize, Debug)]
+pub struct Choice {
+    pub text: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct CompletionApiResponse {
+    pub choices: Vec<Choice>,
+}
+
+pub fn get_ai_completion(prompt: String) -> Result<CompletionApiResponse> {
     dotenv().ok();
     let api_key = env::var("API_KEY").map_err(CompletionApiError::FailedToGetVarEnv)?;
 
-    let response: String = ureq::post("https://api.openai.com/v1/completions")
+    let response_json: String = ureq::post("https://api.openai.com/v1/completions")
         .set("Content-Type", "application/json")
         .set("Authorization", &format!("Bearer {}", &api_key))
         .send_json(ureq::json!({
@@ -29,5 +43,7 @@ pub fn get_ai_completion(prompt: String) -> Result<String> {
         .map_err(|e| CompletionApiError::RequestFailed(Box::new(e)))?
         .into_string()
         .map_err(CompletionApiError::FailedResponseToString)?;
-    Ok(response)
+    let parsed_response: CompletionApiResponse =
+        serde_json::from_str(&response_json).map_err(CompletionApiError::ChoiceParseFailed)?;
+    Ok(parsed_response)
 }
